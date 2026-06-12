@@ -239,3 +239,65 @@ def test_guest_cookie_api_returns_http_cookie(tmp_path):
     assert body["success"] is True
     assert body["data"]["source"] == "http"
     assert "ttwid=guest_ttwid" in body["data"]["cookie"]
+
+
+def test_download_touchsprite_module_returns_zip(tmp_path):
+    module_dir = tmp_path / "module"
+    module_dir.mkdir()
+    zip_path = module_dir / "touchsprite.zip"
+    zip_path.write_bytes(b"touchsprite zip")
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/module/touchsprite/download")
+
+    assert response.status_code == 200
+    assert response.content == b"touchsprite zip"
+    assert response.headers["content-type"] == "application/zip"
+    assert 'filename="touchsprite.zip"' in response.headers["content-disposition"]
+
+
+def test_download_touchsprite_module_returns_404_when_missing(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/module/touchsprite/download")
+
+    assert response.status_code == 404
+    assert "touchsprite.zip 不存在" in response.json()["detail"]
+
+
+def test_touchsprite_module_version_returns_config_v(tmp_path):
+    module_dir = tmp_path / "module"
+    module_dir.mkdir()
+    (module_dir / "config.json").write_text('{"v":"1.0.0"}', encoding="utf-8")
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/module/touchsprite/version")
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "v": "1.0.0"}
+
+
+def test_touchsprite_module_version_returns_404_when_config_missing(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/module/touchsprite/version")
+
+    assert response.status_code == 404
+    assert "config.json 不存在" in response.json()["detail"]
+
+
+def test_touchsprite_module_version_returns_422_when_v_missing(tmp_path):
+    module_dir = tmp_path / "module"
+    module_dir.mkdir()
+    (module_dir / "config.json").write_text('{"name":"touchsprite"}', encoding="utf-8")
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/module/touchsprite/version")
+
+    assert response.status_code == 422
+    assert "config.json 缺少 v 字段" in response.json()["detail"]

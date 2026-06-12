@@ -1,0 +1,26 @@
+path: /Volumes/SSD_1/DevelopmentProject/PythonProject/douyinyolo/datasets/douyin-ui-final-allreview-hardfix-20260611
+train: images/train
+val: images/val
+test: images/val
+nc: 20
+names:
+  0: like
+  1: isLike
+  2: comment
+  3: collection
+  4: isCollection
+  5: share
+  6: follow
+  7: isFollow
+  8: littleHeart
+  9: liveStreaming
+  10: giftPanel
+  11: enterLive
+  12: recommend
+  13: commentLike
+  14: commentIsLike
+  15: send
+  16: noSend
+  17: closeComment
+  18: paste
+  19: closeCommentMask

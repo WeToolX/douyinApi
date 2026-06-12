@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -189,6 +190,31 @@ def create_app(data_dir: Optional[Union[str, Path]] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc))
+
+    @app.get("/api/module/touchsprite/download")
+    async def download_touchsprite_module():
+        zip_path = store.data_dir / "module" / "touchsprite.zip"
+        if not zip_path.exists() or not zip_path.is_file():
+            raise HTTPException(status_code=404, detail="touchsprite.zip 不存在")
+        return FileResponse(
+            zip_path,
+            media_type="application/zip",
+            filename="touchsprite.zip",
+        )
+
+    @app.get("/api/module/touchsprite/version")
+    async def touchsprite_module_version():
+        config_path = store.data_dir / "module" / "config.json"
+        if not config_path.exists() or not config_path.is_file():
+            raise HTTPException(status_code=404, detail="config.json 不存在")
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"config.json 不是合法 JSON: {exc.msg}")
+        version = config.get("v") if isinstance(config, dict) else None
+        if version is None or str(version).strip() == "":
+            raise HTTPException(status_code=422, detail="config.json 缺少 v 字段")
+        return {"success": True, "v": str(version)}
 
     @app.get("/api/sec-uid/douyin-id/{douyin_id}")
     async def resolve_douyin_id(douyin_id: str):
