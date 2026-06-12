@@ -6,6 +6,7 @@ import contextlib
 import json
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -23,6 +24,7 @@ class DouyinQRCodeLogin:
     """抖音创作者中心扫码登录。未安装 Playwright 时接口返回明确错误。"""
 
     login_url = "https://creator.douyin.com/creator-micro/login?enter_from=qr"
+    auth_cookie_names = {"sessionid", "sessionid_ss", "sid_guard", "sid_tt", "passport_auth_id", "odin_tt"}
     field_aliases = {
         "user_id": ("user_id", "userid", "userId", "userID", "id", "biz_user_id", "bizUserId", "login_user_id", "loginUserId"),
         "uid": ("uid", "uid_str", "uidStr", "user_uid", "userUid"),
@@ -92,10 +94,10 @@ class DouyinQRCodeLogin:
         try:
             cookies = await context.cookies()
             cookie_names = {c.get("name") for c in cookies}
-            has_auth_cookie = bool(cookie_names & {"sessionid", "sessionid_ss", "sid_guard", "sid_tt", "passport_auth_id", "odin_tt"})
+            has_auth_cookie = bool(cookie_names & self.auth_cookie_names)
             on_login = "login" in (page.url or "").lower() or "passport" in (page.url or "").lower()
             user_info = await self._extract_user_info(page)
-            if not on_login and (has_auth_cookie or user_info.get("user_id") or user_info.get("douyin_id")):
+            if has_auth_cookie or (not on_login and (user_info.get("user_id") or user_info.get("douyin_id"))):
                 storage_state = await context.storage_state()
                 user_info = self._merge_user_info(
                     user_info,
@@ -109,7 +111,11 @@ class DouyinQRCodeLogin:
                     "storage_state": storage_state,
                     "user_info": user_info,
                 }
-            return {"status": "waiting", "message": "等待手机扫码确认"}
+            return {
+                "status": "waiting",
+                "message": "等待手机扫码确认",
+                "debug": await self._poll_debug(page, cookie_names),
+            }
         except Exception as exc:
             await self.cleanup(session_id)
             return {"status": "failed", "message": str(exc)}
@@ -127,19 +133,54 @@ class DouyinQRCodeLogin:
     async def _extract_qr_image(self, page: Any) -> str:
         selectors = [
             "xpath=//div[@id='animate_qrcode_container']//img[contains(@class,'qrcode_img')]",
+            "xpath=//div[@id='animate_qrcode_container']//*[self::img or self::canvas]",
             "img[class*='qrcode']",
             "img[src*='qrcode']",
             ".qrcode img",
+            "canvas[class*='qrcode']",
+            "[class*='qrcode'] canvas",
+            "[id*='qrcode'] canvas",
         ]
         for selector in selectors:
             with contextlib.suppress(Exception):
                 node = await page.wait_for_selector(selector, timeout=5000)
                 if node:
                     src = await node.get_attribute("src")
-                    if src:
+                    if src and not src.startswith("blob:"):
                         return src
-        shot = await page.screenshot(full_page=False)
-        return f"data:image/png;base64,{base64.b64encode(shot).decode('utf-8')}"
+                    shot = await node.screenshot()
+                    return f"data:image/png;base64,{base64.b64encode(shot).decode('utf-8')}"
+        message = await self._qr_failure_message(page)
+        await self._write_qr_debug_artifacts(page)
+        raise RuntimeError(message)
+
+    async def _poll_debug(self, page: Any, cookie_names: set[str | None]) -> dict[str, Any]:
+        title = ""
+        with contextlib.suppress(Exception):
+            title = await page.title()
+        return {
+            "url": page.url,
+            "title": title,
+            "cookie_names": sorted(name for name in cookie_names if name),
+        }
+
+    async def _qr_failure_message(self, page: Any) -> str:
+        title = ""
+        body_text = ""
+        with contextlib.suppress(Exception):
+            title = await page.title()
+        with contextlib.suppress(Exception):
+            body_text = await page.inner_text("body")
+            body_text = " ".join(body_text.split())[:300]
+        return f"未找到抖音登录二维码，当前页面可能是风控页或 DOM 已变化；url={page.url} title={title} body={body_text}"
+
+    async def _write_qr_debug_artifacts(self, page: Any) -> None:
+        with contextlib.suppress(Exception):
+            debug_dir = Path("logs") / "login_debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            prefix = debug_dir / f"qr_extract_failed_{uuid.uuid4().hex}"
+            (prefix.with_suffix(".html")).write_text(await page.content(), encoding="utf-8")
+            await page.screenshot(path=str(prefix.with_suffix(".png")), full_page=True)
 
     async def _extract_user_info(self, page: Any) -> dict[str, Any]:
         info: dict[str, Any] = {}
